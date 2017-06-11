@@ -11,7 +11,7 @@ public:
     bool LoadFBX(const std::string& filename);
     bool ExportKeyFrames(const std::string& filename);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
-    bool ExportVertexSkinningAsTexture(const std::string& directory, const std::string& fileID);
+    bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
 private:
     int GetNumOfMesh(FbxNode* node);
     void LogError(const std::string& errorMessage);

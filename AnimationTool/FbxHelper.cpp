@@ -281,9 +281,112 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
     return true;
 }
 
-bool FbxHelper::ExportVertexSkinningAsTexture(const std::string& directory, const std::string& fileID)
+bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID)
 {
-    return false;
+    const int MAX_BONE_PER_VERTEX = 8;
+    int meshID = 0;
+    for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
+        auto node = fbxScene_->GetNode(i);
+        FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
+        if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+            if (node->GetChildCount() > 0) {
+                LogInfo("Warning: Mesh node contains child node.");
+            }
+            FbxMesh* mesh = node->GetMesh();
+            const int numOfVertex = mesh->GetControlPointsCount();
+            if (numOfVertex == 0) {
+                LogInfo("Warning: Mesh has no vertex.");
+                continue;
+            }
+            std::vector<std::vector<std::pair<int, float>>> vertexBoneIDAndWeightList(numOfVertex);
+            for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
+                FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
+                int numOfBone = deformer->GetClusterCount();
+                for (int boneIndex = 0; boneIndex < numOfBone; boneIndex++) {
+                    FbxCluster* bone = deformer->GetCluster(boneIndex);
+                    if (!bone->GetLink()) {
+                        continue;
+                    }
+                    //std::cerr << bone->GetLink()->GetName() << std::endl;
+                    int numOfRelatedVertex = bone->GetControlPointIndicesCount();
+                    for (int i = 0; i < numOfRelatedVertex; i++) {
+                        int indexOfVertex = bone->GetControlPointIndices()[i];
+                        if (indexOfVertex >= numOfVertex) {
+                            continue;
+                        }
+                        float boneWeight = static_cast<float>(bone->GetControlPointWeights()[i]);
+                        if (boneWeight == 0.0f) {
+                            continue;
+                        }
+                        vertexBoneIDAndWeightList[indexOfVertex].emplace_back(std::make_pair(boneIndex, boneWeight));
+                    }
+                }
+            }
+            int maxNumOfBonePerVertex = 0;
+            for (const auto& perVertexBoneIDAndWeight : vertexBoneIDAndWeightList) {
+                if (perVertexBoneIDAndWeight.size() > maxNumOfBonePerVertex) {
+                    maxNumOfBonePerVertex = perVertexBoneIDAndWeight.size();
+                }
+            }
+            std::cerr << "max num of bone per vertex: " << maxNumOfBonePerVertex << std::endl;
+            for (int i = 0; i < numOfVertex; i++) {
+                std::sort(vertexBoneIDAndWeightList[i].begin(), vertexBoneIDAndWeightList[i].end(), [](const std::pair<int, float>& a, const std::pair<int, float>& b) {
+                    if (b.second < a.second) {
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            std::vector<int> perVertexBoneIDList0(numOfVertex * 4, 0);
+            std::vector<float> perVertexBoneWeightList0(numOfVertex * 4, 0);
+            std::vector<int> perVertexBoneIDList1(numOfVertex * 4, 0);
+            std::vector<float> perVertexBoneWeightList1(numOfVertex * 4, 0);
+            for (int i = 0; i < numOfVertex; i++) {
+                if (vertexBoneIDAndWeightList[i].size() < MAX_BONE_PER_VERTEX) {
+                    for (int j = 0; j < vertexBoneIDAndWeightList[i].size(); j++) {
+                        if (j < 4) {
+                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].second;
+                        } else {
+                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].second;
+                        }
+                    }
+                } else {
+                    float totalWeight = 0.0f;
+                    for (int j = 0; j < MAX_BONE_PER_VERTEX; j++) {
+                        if (j < 4) {
+                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].second;
+                        } else {
+                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].second;
+                        }
+                        totalWeight += vertexBoneIDAndWeightList[i][j].second;
+                    }
+                    for (int j = 0; j < MAX_BONE_PER_VERTEX; j++) {
+                        if (j < 4) {
+                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] /= totalWeight;
+                        } else {
+                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] /= totalWeight;
+                        }
+                    }
+                }
+            }
+            std::string filename = directory + "\\" + FilterInvalidFileNameChar(fileID + "_" + std::to_string(meshID) + "_" + node->GetName());
+            std::ofstream output(filename, std::ios::binary);
+            std::cerr << "output: " << filename << std::endl;
+            output.write(reinterpret_cast<const char*>(&numOfVertex), sizeof(int));
+            output.write(reinterpret_cast<char*>(perVertexBoneIDList0.data()), sizeof(int) * perVertexBoneIDList0.size());
+            output.write(reinterpret_cast<char*>(perVertexBoneIDList1.data()), sizeof(int) * perVertexBoneIDList1.size());
+            output.write(reinterpret_cast<char*>(perVertexBoneWeightList0.data()), sizeof(float) * perVertexBoneWeightList0.size());
+            output.write(reinterpret_cast<char*>(perVertexBoneWeightList1.data()), sizeof(float) * perVertexBoneWeightList1.size());
+            output.close();
+            meshID++;
+        }
+    }
+
+    return true;
 }
 
 int FbxHelper::GetNumOfMesh(FbxNode* node)
