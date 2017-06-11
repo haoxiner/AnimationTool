@@ -281,6 +281,11 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
     return true;
 }
 
+bool FbxHelper::ExportVertexSkinningAsTexture(const std::string& directory, const std::string& fileID)
+{
+    return false;
+}
+
 int FbxHelper::GetNumOfMesh(FbxNode* node)
 {
     int numOfMesh = 0;
