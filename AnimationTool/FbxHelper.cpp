@@ -213,8 +213,8 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
             std::vector<std::vector<std::pair<int, float>>> vertexBoneIDAndWeightList(numOfVertex);
             for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
                 FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
-                int numOfBone = deformer->GetClusterCount();
-                for (int boneIndex = 0; boneIndex < numOfBone; boneIndex++) {
+                int numOfBoneOfDeformer = deformer->GetClusterCount();
+                for (int boneIndex = 0; boneIndex < numOfBoneOfDeformer; boneIndex++) {
                     FbxCluster* bone = deformer->GetCluster(boneIndex);
                     if (!bone->GetLink()) {
                         continue;
@@ -299,9 +299,11 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
                 continue;
             }
             std::vector<std::vector<std::pair<int, float>>> vertexBoneIDAndWeightList(numOfVertex);
+            int totalBonesOfMesh = 0;
             for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
                 FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
                 int numOfBone = deformer->GetClusterCount();
+                totalBonesOfMesh += numOfBone;
                 for (int boneIndex = 0; boneIndex < numOfBone; boneIndex++) {
                     FbxCluster* bone = deformer->GetCluster(boneIndex);
                     if (!bone->GetLink()) {
@@ -337,48 +339,55 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
                     return false;
                 });
             }
-            std::vector<int> perVertexBoneIDList0(numOfVertex * 4, 0);
+            std::vector<float> perVertexBoneIDList0(numOfVertex * 4, 0);
             std::vector<float> perVertexBoneWeightList0(numOfVertex * 4, 0);
-            std::vector<int> perVertexBoneIDList1(numOfVertex * 4, 0);
+            std::vector<float> perVertexBoneIDList1(numOfVertex * 4, 0);
             std::vector<float> perVertexBoneWeightList1(numOfVertex * 4, 0);
             for (int i = 0; i < numOfVertex; i++) {
                 if (vertexBoneIDAndWeightList[i].size() < MAX_BONE_PER_VERTEX) {
                     for (int j = 0; j < vertexBoneIDAndWeightList[i].size(); j++) {
                         if (j < 4) {
-                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].first;
-                            perVertexBoneWeightList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].second;
+                            perVertexBoneIDList0[i * 4 + j] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList0[i * 4 + j] = vertexBoneIDAndWeightList[i][j].second;
                         } else {
-                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].first;
-                            perVertexBoneWeightList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].second;
+                            perVertexBoneIDList1[i * 4 + j - 4] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList1[i * 4 + j - 4] = vertexBoneIDAndWeightList[i][j].second;
                         }
                     }
                 } else {
                     float totalWeight = 0.0f;
                     for (int j = 0; j < MAX_BONE_PER_VERTEX; j++) {
                         if (j < 4) {
-                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].first;
-                            perVertexBoneWeightList0[i * MAX_BONE_PER_VERTEX + j] = vertexBoneIDAndWeightList[i][j].second;
+                            perVertexBoneIDList0[i * 4 + j] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList0[i * 4 + j] = vertexBoneIDAndWeightList[i][j].second;
                         } else {
-                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].first;
-                            perVertexBoneWeightList1[i * MAX_BONE_PER_VERTEX + j - 4] = vertexBoneIDAndWeightList[i][j].second;
+                            perVertexBoneIDList1[i * 4 + j - 4] = vertexBoneIDAndWeightList[i][j].first;
+                            perVertexBoneWeightList1[i * 4 + j - 4] = vertexBoneIDAndWeightList[i][j].second;
                         }
                         totalWeight += vertexBoneIDAndWeightList[i][j].second;
                     }
                     for (int j = 0; j < MAX_BONE_PER_VERTEX; j++) {
                         if (j < 4) {
-                            perVertexBoneIDList0[i * MAX_BONE_PER_VERTEX + j] /= totalWeight;
+                            perVertexBoneIDList0[i * 4 + j] /= totalWeight;
                         } else {
-                            perVertexBoneIDList1[i * MAX_BONE_PER_VERTEX + j - 4] /= totalWeight;
+                            perVertexBoneIDList1[i * 4 + j - 4] /= totalWeight;
                         }
                     }
                 }
             }
+            for (int i = 0; i < numOfVertex * 4; i++) {
+                perVertexBoneIDList0[i] += 0.5f;
+                perVertexBoneIDList0[i] /= totalBonesOfMesh;
+                perVertexBoneIDList1[i] += 0.5f;
+                perVertexBoneIDList1[i] /= totalBonesOfMesh;
+            }
+            std::cerr << "TOTAL BONE: " << totalBonesOfMesh << std::endl;
             std::string filename = directory + "\\" + FilterInvalidFileNameChar(fileID + "_" + std::to_string(meshID) + "_" + node->GetName());
             std::ofstream output(filename, std::ios::binary);
             std::cerr << "output: " << filename << std::endl;
             output.write(reinterpret_cast<const char*>(&numOfVertex), sizeof(int));
-            output.write(reinterpret_cast<char*>(perVertexBoneIDList0.data()), sizeof(int) * perVertexBoneIDList0.size());
-            output.write(reinterpret_cast<char*>(perVertexBoneIDList1.data()), sizeof(int) * perVertexBoneIDList1.size());
+            output.write(reinterpret_cast<char*>(perVertexBoneIDList0.data()), sizeof(float) * perVertexBoneIDList0.size());
+            output.write(reinterpret_cast<char*>(perVertexBoneIDList1.data()), sizeof(float) * perVertexBoneIDList1.size());
             output.write(reinterpret_cast<char*>(perVertexBoneWeightList0.data()), sizeof(float) * perVertexBoneWeightList0.size());
             output.write(reinterpret_cast<char*>(perVertexBoneWeightList1.data()), sizeof(float) * perVertexBoneWeightList1.size());
             output.close();
