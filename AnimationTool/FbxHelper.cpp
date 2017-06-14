@@ -74,10 +74,12 @@ bool FbxHelper::LoadFBX(const std::string& filename)
     lGeomConverter.Triangulate(fbxScene_, true);
     // Initialize the frame period.
     durationPerFrame_.SetTime(0, 0, 0, 1, 0, fbxScene_->GetGlobalSettings().GetTimeMode());
+
+    ConstructBoneMap();
     return true;
 }
 
-bool FbxHelper::ExportKeyFrames(const std::string& filename)
+bool FbxHelper::ExportKeyFrames(const std::string& directory, const std::string& fileID)
 {
     const int numOfAnimStack = animStackNameArray_.GetCount();
     if (numOfAnimStack > 1) {
@@ -110,18 +112,19 @@ bool FbxHelper::ExportKeyFrames(const std::string& filename)
             "\nStopTime: " + std::to_string(stopTime_.GetMilliSeconds()) +
             "\nDuration per frame: " + std::to_string(durationPerFrame_.GetMilliSeconds()));
 
-    FbxTime lCurTime;
     int numOfFrame = 0;
-    for (auto time = startTime_; lCurTime < stopTime_ + durationPerFrame_; lCurTime += durationPerFrame_) {
+    for (auto time = startTime_; time < stopTime_ + durationPerFrame_; time += durationPerFrame_) {
         numOfFrame++;
     }
     LogInfo("Number of frame: " + std::to_string(numOfFrame));
-    std::ofstream output(filename, std::ios::binary);
+    
+    
     int numOfMesh = 0;
     for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
         auto node = fbxScene_->GetNode(i);
         FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
         if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+            std::cout << "mesh: " << node->GetName() << std::endl;
             numOfMesh++;
             if (node->GetChildCount() > 0) {
                 LogInfo("Warning: Mesh node contains child node.");
@@ -176,14 +179,31 @@ bool FbxHelper::ExportKeyFrames(const std::string& filename)
                         }
                         // transpose
                         for (int i = 0; i < 4; i++) {
-                            for (int j = 1; j < 4; j++) {
+                            for (int j = i + 1; j < 4; j++) {
                                 std::swap(animFrame[4 * i + j], animFrame[4 * j + i]);
                             }
                         }
-                        output.write(reinterpret_cast<char*>(animFrame), sizeof(float) * 12);
+                        auto iter = boneMap_.find(bone->GetLink()->GetName());
+                        if (iter == boneMap_.end()) {
+                            LogError("Unknown bone: " + iter->first);
+                            return false;
+                        }
+                        if (boneAnimMap_[iter->second].size() < numOfFrame * 12) {
+                            for (int i = 0; i < 12; i++) {
+                                boneAnimMap_[iter->second].push_back(animFrame[i]);
+                            }
+                        }
+                        //output.write(reinterpret_cast<char*>(animFrame), sizeof(float) * 12);
                     }
                 }
             }
+        }
+    }
+    std::ofstream output(directory + "/" + FilterInvalidFileNameChar(fileID + ".anim"), std::ios::binary);
+    int count = 0;
+    for (int i = 0; i < numOfFrame; i++) {
+        for (const auto& pair : boneAnimMap_) {
+            output.write((char*)&(pair.second[i * 12]), sizeof(float) * 12);
         }
     }
     output.close();
@@ -230,7 +250,12 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
                         if (boneWeight == 0.0f) {
                             continue;
                         }
-                        vertexBoneIDAndWeightList[indexOfVertex].emplace_back(std::make_pair(boneIndex, boneWeight));
+                        auto iter = boneMap_.find(bone->GetLink()->GetName());
+                        if (iter == boneMap_.end()) {
+                            LogError("Unknown bone: " + iter->first);
+                            return false;
+                        }
+                        vertexBoneIDAndWeightList[indexOfVertex].emplace_back(std::make_pair(iter->second, boneWeight));
                     }
                 }
             }
@@ -267,10 +292,11 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
                     }
                 }
             }
-            std::string filename = directory + "\\" + FilterInvalidFileNameChar(fileID + "_" + std::to_string(meshID) + "_" + node->GetName());
+            std::string filename = directory + "\\" + FilterInvalidFileNameChar(fileID + "_" + std::to_string(meshID) + "_" + node->GetName() + ".skin");
             std::ofstream output(filename, std::ios::binary);
             std::cerr << "output: " << filename << std::endl;
-            output.write(reinterpret_cast<const char*>(&numOfVertex), sizeof(int));
+            std::cerr << "vertices: " << numOfVertex << std::endl;
+            //output.write(reinterpret_cast<const char*>(&numOfVertex), sizeof(int));
             output.write(reinterpret_cast<char*>(perVertexBoneIDList.data()), sizeof(int) * perVertexBoneIDList.size());
             output.write(reinterpret_cast<char*>(perVertexBoneWeightList.data()), sizeof(float) * perVertexBoneWeightList.size());
             output.close();
@@ -396,6 +422,42 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
     }
 
     return true;
+}
+
+void FbxHelper::ConstructBoneMap()
+{
+    for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
+        auto node = fbxScene_->GetNode(i);
+        FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
+        if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+            if (node->GetChildCount() > 0) {
+                LogInfo("Warning: Mesh node contains child node.");
+            }
+            FbxMesh* mesh = node->GetMesh();
+            const int numOfVertex = mesh->GetControlPointsCount();
+            if (numOfVertex == 0) {
+                LogInfo("Warning: Mesh has no vertex.");
+                continue;
+            }
+            for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
+                FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
+                int numOfBoneOfDeformer = deformer->GetClusterCount();
+                for (int boneIndex = 0; boneIndex < numOfBoneOfDeformer; boneIndex++) {
+                    FbxCluster* bone = deformer->GetCluster(boneIndex);
+                    if (!bone->GetLink()) {
+                        continue;
+                    }
+                    auto boneName = bone->GetLink()->GetName();
+                    if (boneMap_.find(boneName) == boneMap_.end()) {
+                        boneMap_.insert({ boneName, boneMap_.size() });
+                    }
+                }
+            }
+        }
+    }
+    for (const auto& pair : boneMap_) {
+        std::cerr << pair.first << ": " << pair.second << std::endl;
+    }
 }
 
 int FbxHelper::GetNumOfMesh(FbxNode* node)

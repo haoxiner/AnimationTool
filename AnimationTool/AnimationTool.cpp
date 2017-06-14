@@ -7,13 +7,13 @@ int main(int argc, char* argv[])
     if (!fbx.Startup()) {
         return 1;
     }
-    if (!fbx.LoadFBX("D:\\Development\\Animation\\FbxImporter\\Release\\body003.fbx")) {
+    if (!fbx.LoadFBX("../../Resources/Model/prototype.FBX")) {
         std::cerr << "Fail To Open" << std::endl;
         return 1;
     }
-    //fbx.ExportKeyFrames("D:\\Development\\anim.bin");
-    //fbx.ExportVertexSkinning("D:\\Development", "skinning");
-    fbx.ExportVertexSkinningAsTextureForFaceUnity("D:\\Development", "skinning");
+    fbx.ExportKeyFrames("../../Resources/Model", "prototype");
+    fbx.ExportVertexSkinning("../../Resources/Model/output/", "prototype");
+    //fbx.ExportVertexSkinningAsTextureForFaceUnity("D:\\Development", "skinning");
     std::cerr << "Everything is ok" << std::endl;
     return 0;
 }

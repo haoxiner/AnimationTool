@@ -3,16 +3,18 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <map>
 class FbxHelper
 {
 public:
     bool Startup();
     ~FbxHelper();
     bool LoadFBX(const std::string& filename);
-    bool ExportKeyFrames(const std::string& filename);
+    bool ExportKeyFrames(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
 private:
+    void ConstructBoneMap();
     int GetNumOfMesh(FbxNode* node);
     void LogError(const std::string& errorMessage);
     void LogInfo(const std::string& message);
@@ -25,6 +27,10 @@ private:
     FbxTime startTime_;
     FbxTime stopTime_;
     FbxArray<FbxString*> animStackNameArray_;
+
+    // collect bones
+    std::map<std::string, int> boneMap_;
+    std::map<int, std::vector<float>> boneAnimMap_;
 };
 inline std::string FilterInvalidFileNameChar(const std::string& filename)
 {
