@@ -1,9 +1,10 @@
 #pragma once
 #include <fbxsdk.h>
-#include <string>
+#include <fbxsdk\scene\geometry\fbxnode.h>
 #include <memory>
 #include <vector>
 #include <map>
+#include <string>
 class FbxHelper
 {
 public:
@@ -13,12 +14,16 @@ public:
     bool ExportKeyFrames(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
+    bool ExportHierarchy(const std::string& directory, const std::string& fileID);
+    bool ExportBlendshapeToObj(const std::string& directory, const std::string& fileID);
 private:
+    void TraverseHierarchy(FbxNode* node, FbxNode* parent);
     void ConstructBoneMap();
     int GetNumOfMesh(FbxNode* node);
     void LogError(const std::string& errorMessage);
     void LogInfo(const std::string& message);
 private:
+    std::string hierarchyString_;
     std::string errorMessage_;
     FbxManager* fbxManager_ = nullptr;
     FbxScene* fbxScene_ = nullptr;
