@@ -449,6 +449,7 @@ bool FbxHelper::ExportHierarchy(const std::string& directory, const std::string&
 
 bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::string& fileID)
 {
+    std::ofstream output(directory + "/" + fileID + ".obj");
     for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
         auto node = fbxScene_->GetNode(i);
         FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
@@ -469,6 +470,11 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
                         for (int targetShapeIdx = 0; targetShapeIdx < targetShapeCount; targetShapeIdx++) {
                             auto shape = lChannel->GetTargetShape(targetShapeIdx);
                             std::cerr << shape->GetName() << std::endl;
+                            int vSize = shape->GetControlPointsCount();
+                            for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                                auto vertex = shape->GetControlPoints()[vertexIdx];
+                                output << vertex[0] << "," << vertex[1] << "," << vertex[2] << "\r\n";
+                            }
                         }
                     }
                 }
