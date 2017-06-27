@@ -13,7 +13,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    fbx.ExportBlendshapeToObj("G:/", "test");
+    fbx.ExportBlendshapeToObj("G:/output", "test");
 
     //fbx.ExportKeyFrames("../../Resources/Model", "run");
     //fbx.ExportVertexSkinning("../../Resources/Model", "prototype");

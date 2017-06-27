@@ -7,6 +7,8 @@
 #include <tuple>
 
 void ComputeShapeDeformation(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer* pAnimLayer, FbxVector4* pVertexArray);
+void ComputeBlenshapeAnimationWeight(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer* pAnimLayer, std::vector<double>& weights);
+
 std::string FilterInvalidFileNameChar(const std::string& filename)
 {
     std::string str = filename;
@@ -562,6 +564,34 @@ bool FbxHelper::ExportHierarchy(const std::string& directory, const std::string&
 
 bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::string& fileID)
 {
+    // animation
+    FbxAnimStack * lCurrentAnimationStack = fbxScene_->FindMember<FbxAnimStack>(animStackNameArray_[0]->Buffer());
+    auto animLayer = lCurrentAnimationStack->GetMember<FbxAnimLayer>();
+    fbxScene_->SetCurrentAnimationStack(lCurrentAnimationStack);
+
+    FbxTakeInfo* lCurrentTakeInfo = fbxScene_->GetTakeInfo(*(animStackNameArray_[0]));
+    if (lCurrentTakeInfo) {
+        startTime_ = lCurrentTakeInfo->mLocalTimeSpan.GetStart();
+        stopTime_ = lCurrentTakeInfo->mLocalTimeSpan.GetStop();
+    } else {
+        // Take the time line value
+        FbxTimeSpan lTimeLineTimeSpan;
+        fbxScene_->GetGlobalSettings().GetTimelineDefaultTimeSpan(lTimeLineTimeSpan);
+
+        startTime_ = lTimeLineTimeSpan.GetStart();
+        stopTime_ = lTimeLineTimeSpan.GetStop();
+    }
+    int lStart = (int)startTime_.GetMilliSeconds();
+    int lStop = (int)stopTime_.GetMilliSeconds();
+    int lTime = (int)durationPerFrame_.GetMilliSeconds();
+    
+    int frameCount = 0;
+    for (FbxTime time = startTime_; time < stopTime_ + durationPerFrame_; time += durationPerFrame_) {
+        frameCount++;
+    }
+    std::cerr << "Num of frames: " << frameCount << std::endl;
+
+    // output
     int outputIndex = 0;
     for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
         auto node = fbxScene_->GetNode(nodeIdx);
@@ -573,18 +603,18 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
             FbxMesh* mesh = node->GetMesh();
             
             auto faceCount = mesh->GetPolygonCount();
+            int vertexCount = mesh->GetControlPointsCount();
             std::vector<int> indices;
             std::vector<std::tuple<float, float, float>> normals(mesh->GetControlPointsCount());
             std::vector<std::tuple<float, float>> texCoords(mesh->GetControlPointsCount());
-            std::tuple<float, float, float> t;
-            
+
             FbxStringList uvNames;
             mesh->GetUVSetNames(uvNames);
-            
+            std::cerr << uvNames[0] << std::endl;
             for (int faceIdx = 0; faceIdx < faceCount; faceIdx++) {
                 for (int vIdx = 0; vIdx < 3; vIdx++) {
                     int index = mesh->GetPolygonVertex(faceIdx, vIdx);
-                    indices.push_back(index);
+                    indices.push_back(index);                    
                     FbxVector4 normal;
                     mesh->GetPolygonVertexNormal(faceIdx, vIdx, normal);
                     normals[index] = std::make_tuple(normal[0], normal[1], normal[2]);
@@ -599,11 +629,12 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
                 FbxBlendShape* lBlendShape = (FbxBlendShape*)mesh->GetDeformer(deformerIdx, FbxDeformer::eBlendShape);
 
                 int blendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
+                std::cerr << "Channel Count: " << blendShapeChannelCount << std::endl;
                 for (int channelIdx = 0; channelIdx < blendShapeChannelCount; ++channelIdx) {
                     FbxBlendShapeChannel* channel = lBlendShape->GetBlendShapeChannel(channelIdx);
                     if (channel) {
+                        // export blendshape
                         auto targetShapeCount = channel->GetTargetShapeCount();
-                        
                         for (int targetShapeIdx = 0; targetShapeIdx < targetShapeCount; targetShapeIdx++) {
                             auto shape = channel->GetTargetShape(targetShapeIdx);
                             std::ofstream output(directory + "/" + fileID + FilterInvalidFileNameChar(shape->GetName()) + "_" + std::to_string(outputIndex++) + ".obj");
@@ -656,6 +687,84 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
             // ====================================================== //
         }
     }
+    std::ofstream animOutput(directory + "/" + fileID + ".txt");
+    std::vector<std::vector<double>> weightsTable;
+    for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
+        auto node = fbxScene_->GetNode(nodeIdx);
+        FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
+        if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+            if (node->GetChildCount() > 0) {
+                LogInfo("Warning: Mesh node contains child node.");
+            }
+            FbxMesh* mesh = node->GetMesh();
+            for (FbxTime time = startTime_; time < stopTime_ + durationPerFrame_; time += durationPerFrame_) {
+                //animOutput << frameIdx++ << ": " << weight / fullWeight << std::endl;
+                std::vector<double> weights;
+                ComputeBlenshapeAnimationWeight(mesh, time, animLayer, weights);
+                if (weights.empty()) {
+                    break;
+                }
+                weightsTable.emplace_back(weights);
+            }
+        }
+    }
+    animOutput << "{\nexpressions:[";
+    bool objBegin = true;
+    for (const auto& row : weightsTable) {
+        if (objBegin) {
+            objBegin = false;
+        } else {
+            animOutput << ",";
+        }
+        animOutput << "\n[";
+        bool rowBegin = true;
+        for (const auto& v : row) {
+            if (rowBegin) {
+                rowBegin = false;
+            } else {
+                animOutput << ", ";
+            }
+            animOutput << v;
+        }
+        animOutput << "]";
+    }
+    animOutput << "\n]}";
+    // output animation
+    //for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
+    //    auto node = fbxScene_->GetNode(nodeIdx);
+    //    FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
+    //    if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+    //        if (node->GetChildCount() > 0) {
+    //            LogInfo("Warning: Mesh node contains child node.");
+    //        }
+    //        FbxMesh* mesh = node->GetMesh();
+    //        auto deformerCount = mesh->GetDeformerCount(FbxDeformer::eBlendShape);
+    //        for (int deformerIdx = 0; deformerIdx < deformerCount; deformerIdx++) {
+    //            FbxBlendShape* lBlendShape = (FbxBlendShape*)mesh->GetDeformer(deformerIdx, FbxDeformer::eBlendShape);
+    //            int blendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
+    //            for (int channelIdx = 0; channelIdx < blendShapeChannelCount; ++channelIdx) {
+    //                FbxBlendShapeChannel* channel = lBlendShape->GetBlendShapeChannel(channelIdx);
+    //                if (channel) {
+    //                    // blendshape
+    //                    auto targetShapeCount = channel->GetTargetShapeCount();
+    //                    for (int targetShapeIdx = 0; targetShapeIdx < targetShapeCount; targetShapeIdx++) {
+    //                        auto shape = channel->GetTargetShape(targetShapeIdx);
+    //                        animOutput << shape->GetName() << std::endl;
+    //                    }
+    //                    // expression animation
+    //                    int frameIdx = 1;
+    //                    for (FbxTime time = startTime_; time < stopTime_ + durationPerFrame_; time += durationPerFrame_) {
+    //                        FbxAnimCurve* curve = mesh->GetShapeChannel(deformerIdx, channelIdx, animLayer);
+    //                        if (!curve) continue;
+    //                        double weight = curve->Evaluate(time);
+    //                        double fullWeight = channel->GetTargetShapeFullWeights()[0];
+    //                        animOutput << frameIdx++ << ": " << weight / fullWeight << std::endl;
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+    //}
     return false;
 }
 
@@ -837,6 +946,68 @@ FbxAMatrix GetGeometry(FbxNode* pNode)
     return FbxAMatrix(lT, lR, lS);
 }
 
+void ComputeBlenshapeAnimationWeight(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer* pAnimLayer, std::vector<double>& weights)
+{
+    int lBlendShapeDeformerCount = pMesh->GetDeformerCount(FbxDeformer::eBlendShape);
+    for (int lBlendShapeIndex = 0; lBlendShapeIndex<lBlendShapeDeformerCount; ++lBlendShapeIndex) {
+        FbxBlendShape* lBlendShape = (FbxBlendShape*)pMesh->GetDeformer(lBlendShapeIndex, FbxDeformer::eBlendShape);
+        int lBlendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
+        for (int lChannelIndex = 0; lChannelIndex<lBlendShapeChannelCount; ++lChannelIndex) {
+            FbxBlendShapeChannel* lChannel = lBlendShape->GetBlendShapeChannel(lChannelIndex);
+            if (lChannel) {
+                // Get the percentage of influence on this channel.
+                FbxAnimCurve* lFCurve = pMesh->GetShapeChannel(lBlendShapeIndex, lChannelIndex, pAnimLayer);
+                if (!lFCurve) continue;
+                double lWeight = lFCurve->Evaluate(pTime);
+
+                // Find the two shape indices for influence calculation according to the weight.
+                // Consider index of base geometry as -1.
+
+                int lShapeCount = lChannel->GetTargetShapeCount();
+                double* lFullWeights = lChannel->GetTargetShapeFullWeights();
+
+                // Find out which scope the lWeight falls in.
+                int lStartIndex = -1;
+                int lEndIndex = -1;
+                for (int lShapeIndex = 0; lShapeIndex<lShapeCount; ++lShapeIndex) {
+                    if (lWeight > 0 && lWeight <= lFullWeights[0]) {
+                        lEndIndex = 0;
+                        break;
+                    }
+                    if (lWeight > lFullWeights[lShapeIndex] && lWeight < lFullWeights[lShapeIndex + 1]) {
+                        lStartIndex = lShapeIndex;
+                        lEndIndex = lShapeIndex + 1;
+                        break;
+                    }
+                }
+
+                FbxShape* lStartShape = NULL;
+                FbxShape* lEndShape = NULL;
+                if (lStartIndex > -1) {
+                    lStartShape = lChannel->GetTargetShape(lStartIndex);
+                }
+                if (lEndIndex > -1) {
+                    lEndShape = lChannel->GetTargetShape(lEndIndex);
+                }
+
+                //The weight percentage falls between base geometry and the first target shape.
+                if (lStartIndex == -1 && lEndShape) {
+                    double lEndWeight = lFullWeights[0];
+                    // Calculate the real weight.
+                    lWeight = (lWeight / lEndWeight);
+                }
+                //The weight percentage falls between two target shapes.
+                else if (lStartShape && lEndShape) {
+                    double lStartWeight = lFullWeights[lStartIndex];
+                    double lEndWeight = lFullWeights[lEndIndex];
+                    // Calculate the real weight.
+                    lWeight = ((lWeight - lStartWeight) / (lEndWeight - lStartWeight));
+                }
+                weights.push_back(lWeight);
+            }//If lChannel is valid
+        }//For each blend shape channel
+    }//For each blend shape deformer
+}
 
 // Deform the vertex array with the shapes contained in the mesh.
 void ComputeShapeDeformation(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer* pAnimLayer, FbxVector4* pVertexArray)
