@@ -4,8 +4,121 @@
 #include <iostream>
 #include <algorithm>
 #include <fstream>
+#include <tuple>
 
 void ComputeShapeDeformation(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer* pAnimLayer, FbxVector4* pVertexArray);
+std::string FilterInvalidFileNameChar(const std::string& filename)
+{
+    std::string str = filename;
+    std::string t;
+    t.resize(9);
+    t[0] = 0x5C;
+    t[1] = 0x2F;
+    t[2] = 0x3A;
+    t[3] = 0x2A;
+    t[4] = 0x3F;
+    t[5] = 0x22;
+    t[6] = 0x3C;
+    t[7] = 0x3E;
+    t[8] = 0x7C;
+    int length = str.length();
+    for (int i = 0; i< length; ++i) {
+        if (str[i] <= 0x1F || str[i] == 0x7F || t.find(str[i]) != std::string::npos) {
+            str[i] = 0x5F;
+        }
+    }
+    return str;
+}
+/****************************************************************************************
+
+Copyright (C) 2015 Autodesk, Inc.
+All rights reserved.
+
+Use of this software is subject to the terms of the Autodesk license agreement
+provided at the time of installation or download, or which otherwise accompanies
+this software in either electronic or hard copy form.
+
+****************************************************************************************/
+#ifndef _GET_POSITION_H
+#define _GET_POSITION_H
+
+FbxAMatrix GetGlobalPosition(FbxNode* pNode,
+                             const FbxTime& pTime,
+                             FbxPose* pPose = NULL,
+                             FbxAMatrix* pParentGlobalPosition = NULL);
+FbxAMatrix GetPoseMatrix(FbxPose* pPose,
+                         int pNodeIndex);
+FbxAMatrix GetGeometry(FbxNode* pNode);
+//Compute the transform matrix that the cluster will transform the vertex.
+void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
+                                      FbxMesh* pMesh,
+                                      FbxCluster* pCluster,
+                                      FbxAMatrix& pVertexTransformMatrix,
+                                      FbxTime pTime,
+                                      FbxPose* pPose)
+{
+    FbxCluster::ELinkMode lClusterMode = pCluster->GetLinkMode();
+
+    FbxAMatrix lReferenceGlobalInitPosition;
+    FbxAMatrix lReferenceGlobalCurrentPosition;
+    FbxAMatrix lAssociateGlobalInitPosition;
+    FbxAMatrix lAssociateGlobalCurrentPosition;
+    FbxAMatrix lClusterGlobalInitPosition;
+    FbxAMatrix lClusterGlobalCurrentPosition;
+
+    FbxAMatrix lReferenceGeometry;
+    FbxAMatrix lAssociateGeometry;
+    FbxAMatrix lClusterGeometry;
+
+    FbxAMatrix lClusterRelativeInitPosition;
+    FbxAMatrix lClusterRelativeCurrentPositionInverse;
+
+    if (lClusterMode == FbxCluster::eAdditive && pCluster->GetAssociateModel()) {
+        pCluster->GetTransformAssociateModelMatrix(lAssociateGlobalInitPosition);
+        // Geometric transform of the model
+        lAssociateGeometry = GetGeometry(pCluster->GetAssociateModel());
+        lAssociateGlobalInitPosition *= lAssociateGeometry;
+        lAssociateGlobalCurrentPosition = GetGlobalPosition(pCluster->GetAssociateModel(), pTime, pPose);
+
+        pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
+        // Multiply lReferenceGlobalInitPosition by Geometric Transformation
+        lReferenceGeometry = GetGeometry(pMesh->GetNode());
+        lReferenceGlobalInitPosition *= lReferenceGeometry;
+        lReferenceGlobalCurrentPosition = pGlobalPosition;
+
+        // Get the link initial global position and the link current global position.
+        pCluster->GetTransformLinkMatrix(lClusterGlobalInitPosition);
+        // Multiply lClusterGlobalInitPosition by Geometric Transformation
+        lClusterGeometry = GetGeometry(pCluster->GetLink());
+        lClusterGlobalInitPosition *= lClusterGeometry;
+        lClusterGlobalCurrentPosition = GetGlobalPosition(pCluster->GetLink(), pTime, pPose);
+
+        // Compute the shift of the link relative to the reference.
+        //ModelM-1 * AssoM * AssoGX-1 * LinkGX * LinkM-1*ModelM
+        pVertexTransformMatrix = lReferenceGlobalInitPosition.Inverse() * lAssociateGlobalInitPosition * lAssociateGlobalCurrentPosition.Inverse() *
+            lClusterGlobalCurrentPosition * lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
+    } else {
+        pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
+        lReferenceGlobalCurrentPosition = pGlobalPosition;
+        // Multiply lReferenceGlobalInitPosition by Geometric Transformation
+        lReferenceGeometry = GetGeometry(pMesh->GetNode());
+        lReferenceGlobalInitPosition *= lReferenceGeometry;
+
+        // Get the link initial global position and the link current global position.
+        pCluster->GetTransformLinkMatrix(lClusterGlobalInitPosition);
+        lClusterGlobalCurrentPosition = GetGlobalPosition(pCluster->GetLink(), pTime, pPose);
+
+        // Compute the initial position of the link relative to the reference.
+        lClusterRelativeInitPosition = lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
+
+        // Compute the current position of the link relative to the reference.
+        lClusterRelativeCurrentPositionInverse = lReferenceGlobalCurrentPosition.Inverse() * lClusterGlobalCurrentPosition;
+
+        // Compute the shift of the link relative to the reference.
+        pVertexTransformMatrix = lClusterRelativeCurrentPositionInverse * lClusterRelativeInitPosition;
+    }
+}
+#endif // #ifndef _GET_POSITION_H
 
 bool FbxHelper::Startup()
 {
@@ -449,32 +562,71 @@ bool FbxHelper::ExportHierarchy(const std::string& directory, const std::string&
 
 bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::string& fileID)
 {
-    std::ofstream output(directory + "/" + fileID + ".obj");
-    for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
-        auto node = fbxScene_->GetNode(i);
+    int outputIndex = 0;
+    for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
+        auto node = fbxScene_->GetNode(nodeIdx);
         FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
         if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
             if (node->GetChildCount() > 0) {
                 LogInfo("Warning: Mesh node contains child node.");
             }
-            FbxMesh* lMesh = node->GetMesh();
-            auto deformerCount = lMesh->GetDeformerCount(FbxDeformer::eBlendShape);
+            FbxMesh* mesh = node->GetMesh();
+            
+            auto faceCount = mesh->GetPolygonCount();
+            std::vector<int> indices;
+            std::vector<std::tuple<float, float, float>> normals(mesh->GetControlPointsCount());
+            std::vector<std::tuple<float, float>> texCoords(mesh->GetControlPointsCount());
+            std::tuple<float, float, float> t;
+            
+            FbxStringList uvNames;
+            mesh->GetUVSetNames(uvNames);
+            
+            for (int faceIdx = 0; faceIdx < faceCount; faceIdx++) {
+                for (int vIdx = 0; vIdx < 3; vIdx++) {
+                    int index = mesh->GetPolygonVertex(faceIdx, vIdx);
+                    indices.push_back(index);
+                    FbxVector4 normal;
+                    mesh->GetPolygonVertexNormal(faceIdx, vIdx, normal);
+                    normals[index] = std::make_tuple(normal[0], normal[1], normal[2]);
+                    bool unmapped;
+                    FbxVector2 texCoord;
+                    mesh->GetPolygonVertexUV(faceIdx, vIdx, uvNames[0], texCoord, unmapped);
+                    texCoords[index] = std::make_tuple(texCoord[0], texCoord[1]);
+                }
+            }
+            auto deformerCount = mesh->GetDeformerCount(FbxDeformer::eBlendShape);
             for (int deformerIdx = 0; deformerIdx < deformerCount; deformerIdx++) {
-                FbxBlendShape* lBlendShape = (FbxBlendShape*)lMesh->GetDeformer(deformerIdx, FbxDeformer::eBlendShape);
+                FbxBlendShape* lBlendShape = (FbxBlendShape*)mesh->GetDeformer(deformerIdx, FbxDeformer::eBlendShape);
 
-                int lBlendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
-                for (int lChannelIndex = 0; lChannelIndex < lBlendShapeChannelCount; ++lChannelIndex) {
-                    FbxBlendShapeChannel* lChannel = lBlendShape->GetBlendShapeChannel(lChannelIndex);
-                    if (lChannel) {
-                        auto targetShapeCount = lChannel->GetTargetShapeCount();
+                int blendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
+                for (int channelIdx = 0; channelIdx < blendShapeChannelCount; ++channelIdx) {
+                    FbxBlendShapeChannel* channel = lBlendShape->GetBlendShapeChannel(channelIdx);
+                    if (channel) {
+                        auto targetShapeCount = channel->GetTargetShapeCount();
+                        
                         for (int targetShapeIdx = 0; targetShapeIdx < targetShapeCount; targetShapeIdx++) {
-                            auto shape = lChannel->GetTargetShape(targetShapeIdx);
-                            std::cerr << shape->GetName() << std::endl;
+                            auto shape = channel->GetTargetShape(targetShapeIdx);
+                            std::ofstream output(directory + "/" + fileID + FilterInvalidFileNameChar(shape->GetName()) + "_" + std::to_string(outputIndex++) + ".obj");
                             int vSize = shape->GetControlPointsCount();
                             for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
-                                auto vertex = shape->GetControlPoints()[vertexIdx];
-                                output << vertex[0] << "," << vertex[1] << "," << vertex[2] << "\r\n";
+                                auto& vertex = shape->GetControlPoints()[vertexIdx];
+                                output << "v " << vertex[0] << " " << vertex[1] << " " << vertex[2] << "\r\n";
                             }
+                            for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                                auto& normal = normals[vertexIdx];
+                                output << "vn " << std::get<0>(normal) << " " << std::get<1>(normal) << " " << std::get<2>(normal) << "\r\n";
+                            }
+                            for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                                auto& texCoord = texCoords[vertexIdx];
+                                output << "vt " << std::get<0>(texCoord) << " " << std::get<1>(texCoord) << "\r\n";
+                            }
+                            for (int indexIdx = 0; indexIdx < indices.size(); indexIdx+=3) {
+                                output << "f " 
+                                    << indices[indexIdx] + 1 << "/" << indices[indexIdx] + 1 << "/" << indices[indexIdx] + 1 << " "
+                                    << indices[indexIdx + 1] + 1 << "/" << indices[indexIdx + 1] + 1 << "/" << indices[indexIdx + 1] + 1 << " "
+                                    << indices[indexIdx + 2] + 1 << "/" << indices[indexIdx + 2] + 1 << "/" << indices[indexIdx + 2] + 1 << "\r\n";
+                            }
+                            output.close();
                         }
                     }
                 }

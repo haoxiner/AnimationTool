@@ -7,7 +7,8 @@ int main(int argc, char* argv[])
     if (!fbx.Startup()) {
         return 1;
     }
-    if (!fbx.LoadFBX("G:/wyx/xiaohai_bs_01_wb.fbx")) {
+//G: / wyx / xiaohai_bs_01_wb.fbx
+    if (!fbx.LoadFBX("G:/wyh/expressions/nixing_bs_dh.fbx")) {
         std::cerr << "Fail To Open" << std::endl;
         return 1;
     }
