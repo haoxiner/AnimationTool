@@ -10,11 +10,15 @@ public:
     bool Startup();
     ~FbxHelper();
     bool LoadFBX(const std::string& filename);
-    bool ExportKeyFrames(const std::string& directory, const std::string& fileID);
+    bool ExportAllFrames(const std::string& directory, const std::string& fileID);
+    bool ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
+    
     bool ExportHierarchy(const std::string& directory, const std::string& fileID);
-    bool ExportBlendshapeToObj(const std::string& directory, const std::string& fileID);
+    bool ExportHierarchyAnimation(const std::string& directory, const std::string& fileID);
+
+    bool ExportBlendshapeToObj(const std::string& directory, const std::string& fileID, bool noBlendshape = true);
 private:
     void TraverseHierarchy(FbxNode* node, FbxNode* parent);
     void ConstructBoneMap();
