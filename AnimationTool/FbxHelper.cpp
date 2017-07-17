@@ -76,6 +76,7 @@ void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
     FbxAMatrix lClusterRelativeCurrentPositionInverse;
 
     if (lClusterMode == FbxCluster::eAdditive && pCluster->GetAssociateModel()) {
+        std::cerr << "========================== 00000000000 ===========================" << std::endl;
         pCluster->GetTransformAssociateModelMatrix(lAssociateGlobalInitPosition);
         // Geometric transform of the model
         lAssociateGeometry = GetGeometry(pCluster->GetAssociateModel());
@@ -100,6 +101,7 @@ void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
         pVertexTransformMatrix = lReferenceGlobalInitPosition.Inverse() * lAssociateGlobalInitPosition * lAssociateGlobalCurrentPosition.Inverse() *
             lClusterGlobalCurrentPosition * lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
     } else {
+        
         pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
         lReferenceGlobalCurrentPosition = pGlobalPosition;
         // Multiply lReferenceGlobalInitPosition by Geometric Transformation
@@ -119,6 +121,47 @@ void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
         // Compute the shift of the link relative to the reference.
         pVertexTransformMatrix = lClusterRelativeCurrentPositionInverse * lClusterRelativeInitPosition;
     }
+}
+void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
+                               FbxMesh* pMesh,
+                               FbxCluster* pCluster,
+                               FbxAMatrix& pVertexTransformMatrix,
+                               FbxTime pTime)
+{
+    FbxCluster::ELinkMode lClusterMode = pCluster->GetLinkMode();
+
+    FbxAMatrix lReferenceGlobalInitPosition;
+    FbxAMatrix lReferenceGlobalCurrentPosition;
+    FbxAMatrix lAssociateGlobalInitPosition;
+    FbxAMatrix lAssociateGlobalCurrentPosition;
+    FbxAMatrix lClusterGlobalInitPosition;
+    FbxAMatrix lClusterGlobalCurrentPosition;
+
+    FbxAMatrix lReferenceGeometry;
+    FbxAMatrix lAssociateGeometry;
+    FbxAMatrix lClusterGeometry;
+
+    FbxAMatrix lClusterRelativeInitPosition;
+    FbxAMatrix lClusterRelativeCurrentPositionInverse;
+
+    pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
+    lReferenceGlobalCurrentPosition = pGlobalPosition;
+    // Multiply lReferenceGlobalInitPosition by Geometric Transformation
+    lReferenceGeometry = GetGeometry(pMesh->GetNode());
+    lReferenceGlobalInitPosition *= lReferenceGeometry;
+
+    // Get the link initial global position and the link current global position.
+    pCluster->GetTransformLinkMatrix(lClusterGlobalInitPosition);
+    //lClusterGlobalCurrentPosition = GetGlobalPosition(pCluster->GetLink(), pTime, pPose);
+
+    // Compute the initial position of the link relative to the reference.
+    lClusterRelativeInitPosition = lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
+
+    // Compute the current position of the link relative to the reference.
+    lClusterRelativeCurrentPositionInverse = lReferenceGlobalCurrentPosition.Inverse() * lClusterGlobalCurrentPosition;
+
+    // Compute the shift of the link relative to the reference.
+    pVertexTransformMatrix = lClusterRelativeCurrentPositionInverse * lClusterRelativeInitPosition;
 }
 #endif // #ifndef _GET_POSITION_H
 
@@ -200,6 +243,7 @@ bool FbxHelper::LoadFBX(const std::string& filename)
 
 bool FbxHelper::ExportAllFrames(const std::string& directory, const std::string& fileID)
 {
+    boneAnimMap_.clear();
     const int numOfAnimStack = animStackNameArray_.GetCount();
     if (numOfAnimStack > 1) {
         LogError("Multiple anim stack is not supported");
@@ -269,11 +313,11 @@ bool FbxHelper::ExportAllFrames(const std::string& directory, const std::string&
                 LogError("Vertex cache is not supported.");
                 return false;
             }
-            const bool hasShape = mesh->GetShapeCount() > 0;
-            if (hasShape) {
-                LogError("Blendshape is not supported.");
-                return false;
-            }
+            //const bool hasShape = mesh->GetShapeCount() > 0;
+            //if (hasShape) {
+            //    LogError("Blendshape is not supported.");
+            //    return false;
+            //}
             const bool hasSkin = mesh->GetDeformerCount(FbxDeformer::eSkin) > 0;
             if (!hasSkin) {
                 LogInfo("Mesh is not skinning.");
@@ -318,7 +362,35 @@ bool FbxHelper::ExportAllFrames(const std::string& directory, const std::string&
             }
         }
     }
-    std::ofstream output(directory + "/" + FilterInvalidFileNameChar(fileID + ".anim"), std::ios::binary);
+    //std::ofstream json(directory + "/" + FilterInvalidFileNameChar(fileID + ".frame.json"));
+    //json << "{\n";
+    //for (int i = 0; i < numOfFrame; i++) {
+    //    if (i > 0) {
+    //        json << ",\n";
+    //    }
+    //    json << "\"frame_" << i << "\": {\n";
+    //    bool first = true;
+    //    for (const auto& pair : boneMap_) {
+    //        if (first) {
+    //            first = false;
+    //        } else {
+    //            json << ",\n";
+    //        }
+    //        json << "    \"" << pair.first << "\": [";
+    //        for (int j = 0; j < 12; j++) {
+    //            if (j > 0) {
+    //                json << ", ";
+    //            }
+    //            json << boneAnimMap_[pair.second][i * 12 + j];
+    //        }
+    //        json << "]";
+    //    }
+    //    json << "}";
+    //}
+    //json << "}";
+    //json.close();
+
+    std::ofstream output(directory + "/anim.bin", std::ios::binary);
     int count = 0;
     for (int i = 0; i < numOfFrame; i++) {
         for (const auto& pair : boneAnimMap_) {
@@ -327,6 +399,157 @@ bool FbxHelper::ExportAllFrames(const std::string& directory, const std::string&
     }
     output.close();
     LogInfo("Number of mesh: " + std::to_string(numOfMesh));
+    return true;
+}
+static int InterpolationFlagToIndex(int flags)
+{
+    if ((flags & FbxAnimCurveDef::eInterpolationConstant) == FbxAnimCurveDef::eInterpolationConstant) return 1;
+    if ((flags & FbxAnimCurveDef::eInterpolationLinear) == FbxAnimCurveDef::eInterpolationLinear) return 2;
+    if ((flags & FbxAnimCurveDef::eInterpolationCubic) == FbxAnimCurveDef::eInterpolationCubic) return 3;
+    return 0;
+}
+
+static int ConstantmodeFlagToIndex(int flags)
+{
+    if ((flags & FbxAnimCurveDef::eConstantStandard) == FbxAnimCurveDef::eConstantStandard) return 1;
+    if ((flags & FbxAnimCurveDef::eConstantNext) == FbxAnimCurveDef::eConstantNext) return 2;
+    return 0;
+}
+
+static int TangentmodeFlagToIndex(int flags)
+{
+    if ((flags & FbxAnimCurveDef::eTangentAuto) == FbxAnimCurveDef::eTangentAuto) return 1;
+    if ((flags & FbxAnimCurveDef::eTangentAutoBreak) == FbxAnimCurveDef::eTangentAutoBreak) return 2;
+    if ((flags & FbxAnimCurveDef::eTangentTCB) == FbxAnimCurveDef::eTangentTCB) return 3;
+    if ((flags & FbxAnimCurveDef::eTangentUser) == FbxAnimCurveDef::eTangentUser) return 4;
+    if ((flags & FbxAnimCurveDef::eTangentGenericBreak) == FbxAnimCurveDef::eTangentGenericBreak) return 5;
+    if ((flags & FbxAnimCurveDef::eTangentBreak) == FbxAnimCurveDef::eTangentBreak) return 6;
+    return 0;
+}
+
+static int TangentweightFlagToIndex(int flags)
+{
+    if ((flags & FbxAnimCurveDef::eWeightedNone) == FbxAnimCurveDef::eWeightedNone) return 1;
+    if ((flags & FbxAnimCurveDef::eWeightedRight) == FbxAnimCurveDef::eWeightedRight) return 2;
+    if ((flags & FbxAnimCurveDef::eWeightedNextLeft) == FbxAnimCurveDef::eWeightedNextLeft) return 3;
+    return 0;
+}
+
+static int TangentVelocityFlagToIndex(int flags)
+{
+    if ((flags & FbxAnimCurveDef::eVelocityNone) == FbxAnimCurveDef::eVelocityNone) return 1;
+    if ((flags & FbxAnimCurveDef::eVelocityRight) == FbxAnimCurveDef::eVelocityRight) return 2;
+    if ((flags & FbxAnimCurveDef::eVelocityNextLeft) == FbxAnimCurveDef::eVelocityNextLeft) return 3;
+    return 0;
+}
+static void DisplayCurveKeys(FbxAnimCurve* pCurve)
+{
+    static const char* interpolation[] = { "?", "constant", "linear", "cubic" };
+    static const char* constantMode[] = { "?", "Standard", "Next" };
+    static const char* cubicMode[] = { "?", "Auto", "Auto break", "Tcb", "User", "Break", "User break" };
+    static const char* tangentWVMode[] = { "?", "None", "Right", "Next left" };
+
+    FbxTime   lKeyTime;
+    float   lKeyValue;
+    char    lTimeString[256];
+    FbxString lOutputString;
+    int     lCount;
+
+    int lKeyCount = pCurve->KeyGetCount();
+
+    for (lCount = 0; lCount < lKeyCount; lCount++) {
+        lKeyValue = static_cast<float>(pCurve->KeyGetValue(lCount));
+        lKeyTime = pCurve->KeyGetTime(lCount);
+
+        lOutputString = "            Key Time: ";
+        lOutputString += lKeyTime.GetTimeString(lTimeString, FbxUShort(256));
+        lOutputString += ".... Key Value: ";
+        lOutputString += lKeyValue;
+        lOutputString += " [ ";
+        lOutputString += interpolation[InterpolationFlagToIndex(pCurve->KeyGetInterpolation(lCount))];
+        if ((pCurve->KeyGetInterpolation(lCount)&FbxAnimCurveDef::eInterpolationConstant) == FbxAnimCurveDef::eInterpolationConstant) {
+            lOutputString += " | ";
+            lOutputString += constantMode[ConstantmodeFlagToIndex(pCurve->KeyGetConstantMode(lCount))];
+        } else if ((pCurve->KeyGetInterpolation(lCount)&FbxAnimCurveDef::eInterpolationCubic) == FbxAnimCurveDef::eInterpolationCubic) {
+            lOutputString += " | ";
+            lOutputString += cubicMode[TangentmodeFlagToIndex(pCurve->KeyGetTangentMode(lCount))];
+            lOutputString += " | ";
+            lOutputString += tangentWVMode[TangentweightFlagToIndex(pCurve->KeyGet(lCount).GetTangentWeightMode())];
+            lOutputString += " | ";
+            lOutputString += tangentWVMode[TangentVelocityFlagToIndex(pCurve->KeyGet(lCount).GetTangentVelocityMode())];
+        }
+        lOutputString += " ]";
+        lOutputString += "\n";
+        FBXSDK_printf(lOutputString);
+    }
+}
+bool FbxHelper::ExportAllFramesInBoneSpace(const std::string& directory, const std::string& fileID)
+{
+    const int numOfAnimStack = animStackNameArray_.GetCount();
+    if (numOfAnimStack > 1) {
+        LogError("Multiple anim stack is not supported");
+        return false;
+    }
+    const int animIndex = 0;
+    FbxAnimStack* animStack = fbxScene_->FindMember<FbxAnimStack>(animStackNameArray_[animIndex]->Buffer());
+    if (!animStack) {
+        LogError("Invalid anim stack");
+        return false;
+    }
+    FbxAnimLayer* animLayer = animStack->GetMember<FbxAnimLayer>();
+    fbxScene_->SetCurrentAnimationStack(animStack);
+
+    for (int i = 0; i < fbxScene_->GetNodeCount(); i++) {
+        auto node = fbxScene_->GetNode(i);
+        FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
+        if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh) {
+            if (node->GetChildCount() > 0) {
+                LogInfo("Warning: Mesh node contains child node.");
+            }
+            FbxAMatrix geometryOffset = GetGeometry(node);
+            for (FbxTime time = startTime_; time < stopTime_ + durationPerFrame_; time += durationPerFrame_) {
+                FbxAMatrix globalPosition = GetGlobalPosition(node, time, nullptr, nullptr);
+                FbxAMatrix globalOffPosition = globalPosition * geometryOffset;
+                float transformation[16] = { 0.0f };
+                for (int i = 0; i < 16; i++) {
+                    transformation[i] = (float)(((double*)&globalOffPosition)[i]);
+                }
+            }
+            FbxMesh* mesh = node->GetMesh();
+            const int numOfVertex = mesh->GetControlPointsCount();
+            if (numOfVertex == 0) {
+                LogInfo("Warning: Mesh has no vertex.");
+                continue;
+            }
+            const bool hasVertexCache = mesh->GetDeformerCount(FbxDeformer::eVertexCache) &&
+                (static_cast<FbxVertexCacheDeformer*>(mesh->GetDeformer(0, FbxDeformer::eVertexCache)))->Active.Get();
+            if (hasVertexCache) {
+                LogInfo("Vertex cache is not supported.");
+                continue;
+            }
+            const bool hasSkin = mesh->GetDeformerCount(FbxDeformer::eSkin) > 0;
+            if (!hasSkin) {
+                LogInfo("Mesh is not skinning.");
+                continue;
+            }
+
+            for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
+                FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
+                int numOfBone = deformer->GetClusterCount();
+                for (int boneIndex = 0; boneIndex < numOfBone; boneIndex++) {
+                    FbxCluster* bone = deformer->GetCluster(boneIndex);
+                    if (!bone->GetLink()) {
+                        continue;
+                    }
+                    auto boneNode = bone->GetLink();
+                    auto curve = boneNode->LclTranslation.GetCurve(animLayer);
+                    if (curve) {
+                        std::cerr << curve->KeyGetCount() << std::endl;
+                    }
+                }
+            }
+        }
+    }
     return true;
 }
 
@@ -449,8 +672,13 @@ bool FbxHelper::ExportAllFramesAsTexture(const std::string& directory, const std
         }
     }
     std::ofstream output(directory + "/anim.bin", std::ios::binary);
-    for (const auto& pair : boneAnimMap_) {
+    /*for (const auto& pair : boneAnimMap_) {
         output.write(reinterpret_cast<const char*>(pair.second.data()), sizeof(float) * pair.second.size());
+    }*/
+    for (int i = 0; i < numOfFrame; i++) {
+        for (const auto& pair : boneAnimMap_) {
+            output.write((char*)&(pair.second[i * 12]), sizeof(float) * 12);
+        }
     }
     output.close();
     std::ofstream outputJson(directory + "/anim.json");
@@ -674,25 +902,18 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
 
 bool FbxHelper::ExportHierarchy(const std::string& directory, const std::string& fileID)
 {
-    auto root = fbxScene_->GetRootNode();
-    hierarchyString_ += "{\n";
-    TraverseHierarchy(root, nullptr);
-    auto lastCommaIdx = hierarchyString_.find_last_of(',');
-    if (lastCommaIdx != std::string::npos) {
-        hierarchyString_[lastCommaIdx] = '\n';
-        hierarchyString_[lastCommaIdx + 1] = '}';
-    } else {
-        hierarchyString_ += "}";
-    }
-    std::cerr << hierarchyString_ << std::endl;
     std::ofstream file(directory + "/" + fileID + ".json");
     file << hierarchyString_;
     file.close();
+
+    std::ofstream output(directory + "/" + "skeleton_tree", std::ios::binary);
+    output.write(reinterpret_cast<char*>(hierarchyArray_.data()), sizeof(float) * hierarchyArray_.size());
     return true;
 }
 
 bool FbxHelper::ExportHierarchyAnimation(const std::string& directory, const std::string& fileID)
 {
+    boneAnimMap_.clear();
     // animation
     FbxAnimStack * lCurrentAnimationStack = fbxScene_->FindMember<FbxAnimStack>(animStackNameArray_[0]->Buffer());
     auto animLayer = lCurrentAnimationStack->GetMember<FbxAnimLayer>();
@@ -751,6 +972,17 @@ bool FbxHelper::ExportHierarchyAnimation(const std::string& directory, const std
                 LogInfo("Mesh is not skinning.");
                 continue;
             }
+
+            FbxAMatrix matrixGeo;
+            matrixGeo.SetIdentity();
+            if (node->GetNodeAttribute()) {
+                const FbxVector4 lT = node->GetGeometricTranslation(FbxNode::eSourcePivot);
+                const FbxVector4 lR = node->GetGeometricRotation(FbxNode::eSourcePivot);
+                const FbxVector4 lS = node->GetGeometricScaling(FbxNode::eSourcePivot);
+                matrixGeo.SetT(lT);
+                matrixGeo.SetR(lR);
+                matrixGeo.SetS(lS);
+            }
             for (int deformerIndex = 0; deformerIndex < mesh->GetDeformerCount(FbxDeformer::eSkin); deformerIndex++) {
                 FbxSkin* deformer = reinterpret_cast<FbxSkin*>(mesh->GetDeformer(deformerIndex, FbxDeformer::eSkin));
                 int numOfBone = deformer->GetClusterCount();
@@ -765,6 +997,15 @@ bool FbxHelper::ExportHierarchyAnimation(const std::string& directory, const std
                         //auto scale = bone->GetLink()->EvaluateLocalScaling(time);
                         //auto translation = bone->GetLink()->EvaluateLocalTranslation(time);
                         auto transform = bone->GetLink()->EvaluateLocalTransform(time);
+                        //FbxNode* pParentNode = bone->GetLink()->GetParent();
+                        //FbxAMatrix parentMatrix = pParentNode->EvaluateLocalTransform(time);
+                        //while ((pParentNode = pParentNode->GetParent()) != NULL) {
+                        //    parentMatrix = pParentNode->EvaluateLocalTransform(time) * parentMatrix;
+                        //}
+
+                        //FbxAMatrix linkMatrix;
+                        //bone->GetTransformLinkMatrix(linkMatrix);
+                        //transform = transform;
                         //memset(&transform, 0, sizeof(double) * 16);
                         //for (int i = 0; i < 4; i++) {
                         //    transform[i] = translation[i];
@@ -775,11 +1016,11 @@ bool FbxHelper::ExportHierarchyAnimation(const std::string& directory, const std
                             animFrame[i] = (float)(((double*)&transform)[i]);
                         }
                         // transpose
-                        //for (int i = 0; i < 4; i++) {
-                        //    for (int j = i + 1; j < 4; j++) {
-                        //        std::swap(animFrame[4 * i + j], animFrame[4 * j + i]);
-                        //    }
-                        //}
+                        for (int i = 0; i < 4; i++) {
+                            for (int j = i + 1; j < 4; j++) {
+                                std::swap(animFrame[4 * i + j], animFrame[4 * j + i]);
+                            }
+                        }
                         auto iter = boneMap_.find(bone->GetLink()->GetName());
                         if (iter == boneMap_.end()) {
                             LogError("Unknown bone: " + iter->first);
@@ -797,35 +1038,42 @@ bool FbxHelper::ExportHierarchyAnimation(const std::string& directory, const std
         }
     }
     
-    std::ofstream output(directory + "/" + fileID + ".json");
-    output << "{\n";
-    bool firstBone = true;
-    for (const auto& bone : boneMap_) {
-        if (firstBone) {
-            firstBone = false;
-        } else {
-            output << ",\n";
+    std::cerr << "EXPORT HIRARCHY" << std::endl;
+    std::ofstream output(directory + "/" + fileID, std::ios::binary);
+    for (int frameID = 0; frameID < numOfFrame; frameID++) {
+        for (const auto& bone : boneMap_) {
+            auto& boneAnim = boneAnimMap_[bone.second];
+            output.write(reinterpret_cast<char*>(&boneAnim[frameID * 16]), sizeof(float) * 16);
         }
-        auto& boneAnim = boneAnimMap_[bone.second];
-        std::cerr << "Ouput Num of Frame: " << boneAnim.size()/16 << std::endl;
-        output << "\"" << bone.first << "\":[";
-        for (int frameID = 0; frameID < boneAnim.size() / 16; frameID++) {
-            if (frameID != 0) {
-                output << ",";
-            }
-            for (int i = 0; i < 16; i++) {
-                if (i == 0) {
-                    output << "[";
-                } else {
-                    output << ",";
-                }
-                output << boneAnim[frameID * 16 + i];
-            }
-            output << "]";
-        }
-        output << "]";
     }
-    output << "\n}";
+
+    std::ofstream json(directory + "/" + FilterInvalidFileNameChar(fileID + ".frame.json"));
+    json << "{\n";
+    for (int i = 0; i < numOfFrame; i++) {
+        if (i > 0) {
+            json << ",\n";
+        }
+        json << "\"frame_" << i << "\": {\n";
+        bool first = true;
+        for (const auto& pair : boneMap_) {
+            if (first) {
+                first = false;
+            } else {
+                json << ",\n";
+            }
+            json << "    \"" << pair.first << "\": [";
+            for (int j = 0; j < 12; j++) {
+                if (j > 0) {
+                    json << ", ";
+                }
+                json << boneAnimMap_[pair.second][i * 16 + j];
+            }
+            json << "]";
+        }
+        json << "}";
+    }
+    json << "}";
+    json.close();
     return false;
 }
 
@@ -859,8 +1107,9 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
     std::cerr << "Num of frames: " << frameCount << std::endl;
 
     if (!noBlendshape) {
+
         // output blendshape
-        int outputIndex = 0;
+        int meshCount = -1;
         for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
             auto node = fbxScene_->GetNode(nodeIdx);
             FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
@@ -868,6 +1117,7 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
                 if (node->GetChildCount() > 0) {
                     LogInfo("Warning: Mesh node contains child node.");
                 }
+                int outputIndex = 0;
                 FbxMesh* mesh = node->GetMesh();
 
                 auto faceCount = mesh->GetPolygonCount();
@@ -892,6 +1142,30 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
                         texCoords[index] = std::make_tuple(texCoord[0], texCoord[1]);
                     }
                 }
+                {
+                    meshCount++;
+                    std::ofstream output(directory + "/" + FilterInvalidFileNameChar(node->GetName()) + std::to_string(outputIndex++)/* + "_" + FilterInvalidFileNameChar(shape->GetName())*/ + ".obj");
+                    int vSize = vertexCount;
+
+                    for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                        auto& vertex = mesh->GetControlPoints()[vertexIdx];
+                        output << "v " << vertex[0] << " " << vertex[1] << " " << vertex[2] << "\r\n";
+                    }
+                    for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                        auto& normal = normals[vertexIdx];
+                        output << "vn " << std::get<0>(normal) << " " << std::get<1>(normal) << " " << std::get<2>(normal) << "\r\n";
+                    }
+                    for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
+                        auto& texCoord = texCoords[vertexIdx];
+                        output << "vt " << std::get<0>(texCoord) << " " << std::get<1>(texCoord) << "\r\n";
+                    }
+                    for (int indexIdx = 0; indexIdx < indices.size(); indexIdx += 3) {
+                        output << "f "
+                            << indices[indexIdx] + 1 << "/" << indices[indexIdx] + 1 << "/" << indices[indexIdx] + 1 << " "
+                            << indices[indexIdx + 1] + 1 << "/" << indices[indexIdx + 1] + 1 << "/" << indices[indexIdx + 1] + 1 << " "
+                            << indices[indexIdx + 2] + 1 << "/" << indices[indexIdx + 2] + 1 << "/" << indices[indexIdx + 2] + 1 << "\r\n";
+                    }
+                }
                 auto deformerCount = mesh->GetDeformerCount(FbxDeformer::eBlendShape);
                 for (int deformerIdx = 0; deformerIdx < deformerCount; deformerIdx++) {
                     FbxBlendShape* lBlendShape = (FbxBlendShape*)mesh->GetDeformer(deformerIdx, FbxDeformer::eBlendShape);
@@ -905,7 +1179,7 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
                             auto targetShapeCount = channel->GetTargetShapeCount();
                             for (int targetShapeIdx = 0; targetShapeIdx < targetShapeCount; targetShapeIdx++) {
                                 auto shape = channel->GetTargetShape(targetShapeIdx);
-                                std::ofstream output(directory + "/" + std::to_string(outputIndex++) + "_" + FilterInvalidFileNameChar(shape->GetName()) + ".obj");
+                                std::ofstream output(directory + "/" + FilterInvalidFileNameChar(node->GetName()) + std::to_string(outputIndex++)/* + "_" + FilterInvalidFileNameChar(shape->GetName())*/ + ".obj");
                                 int vSize = shape->GetControlPointsCount();
                                 for (int vertexIdx = 0; vertexIdx < vSize; vertexIdx++) {
                                     auto& vertex = shape->GetControlPoints()[vertexIdx];
@@ -934,7 +1208,6 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
         }
     }
     // output expression animation
-    std::ofstream animOutput(directory);
     std::vector<std::vector<double>> weightsTable;
     for (int nodeIdx = 0; nodeIdx < fbxScene_->GetNodeCount(); nodeIdx++) {
         auto node = fbxScene_->GetNode(nodeIdx);
@@ -955,28 +1228,42 @@ bool FbxHelper::ExportBlendshapeToObj(const std::string& directory, const std::s
             }
         }
     }
-    animOutput << "{\n\"expressions\":[";
-    bool objBegin = true;
+
+    //std::ofstream animOutput(directory + std::string("/expression.json"));
+    //animOutput << "{\n\"expressions\":[";
+    //bool objBegin = true;
+    //for (const auto& row : weightsTable) {
+    //    if (objBegin) {
+    //        objBegin = false;
+    //    } else {
+    //        animOutput << ",";
+    //    }
+    //    animOutput << "\n[";
+    //    bool rowBegin = true;
+    //    for (const auto& v : row) {
+    //        if (rowBegin) {
+    //            rowBegin = false;
+    //        } else {
+    //            animOutput << ", ";
+    //        }
+    //        animOutput << v;
+    //    }
+    //    animOutput << "]";
+    //}
+    //animOutput << "\n]}";
+
+    std::ofstream expressionOutput(directory + std::string("/expression.bin"), std::ios::binary);
+    int numOfExpression = weightsTable.size();
+    int numOfBlendshape = numOfExpression > 0 ? weightsTable[0].size() : 0;
+    expressionOutput.write((char*)&numOfExpression, sizeof(int));
+    expressionOutput.write((char*)&numOfBlendshape, sizeof(int));
     for (const auto& row : weightsTable) {
-        if (objBegin) {
-            objBegin = false;
-        } else {
-            animOutput << ",";
-        }
-        animOutput << "\n[";
-        bool rowBegin = true;
         for (const auto& v : row) {
-            if (rowBegin) {
-                rowBegin = false;
-            } else {
-                animOutput << ", ";
-            }
-            animOutput << v;
+            float expr = v;
+            expressionOutput.write((char*)&expr, sizeof(expr));
         }
-        animOutput << "]";
     }
-    animOutput << "\n]}";
-    return false;
+    return true;
 }
 
 void FbxHelper::TraverseHierarchy(FbxNode* node, FbxNode* parent)
@@ -984,34 +1271,17 @@ void FbxHelper::TraverseHierarchy(FbxNode* node, FbxNode* parent)
     FbxNodeAttribute* nodeAttribute = node->GetNodeAttribute();
     if (nodeAttribute && nodeAttribute->GetAttributeType() == FbxNodeAttribute::eSkeleton) {
         //hierarchyString_ += "\"" + std::string(node->GetName()) + "\": {\n\"parent\": ";
-        hierarchyString_ += "\"" + std::string(node->GetName()) + "\":";
+        hierarchyString_ += "\"" + std::to_string(boneMap_[node->GetName()]) + "_" + std::string(node->GetName()) + "\":";
         if (parent) {
             hierarchyString_ += "\"";
-            hierarchyString_ += parent->GetName();
+            hierarchyString_ += std::to_string(boneMap_[parent->GetName()]) + "_" + parent->GetName();
+            hierarchyArray_[boneMap_[node->GetName()]] = boneMap_[parent->GetName()];
             hierarchyString_ += "\"";
         } else {
+            hierarchyArray_[boneMap_[node->GetName()]] = -1;
             hierarchyString_ += "null";
         }
         hierarchyString_ += ",\n";
-
-        //hierarchyString_ += "\"name\": \"";
-        //hierarchyString_ += node->GetName();
-        //hierarchyString_ += "\",\n";
-
-        //const FbxDouble3 lT = node->LclTranslation;
-        //const FbxDouble3 lR = node->LclRotation;
-        //const FbxDouble3 lS = node->LclScaling;
-
-        //hierarchyString_ += "\"rotation\": [";
-        //for (int i = 0; i < 3; i++) {
-        //    hierarchyString_ += std::to_string(lR[i]) + ((i < 2) ? ", " : "],\n");
-        //}
-        //hierarchyString_ += "\"translation\": [";
-        //for (int i = 0; i < 3; i++) {
-        //    hierarchyString_ += std::to_string(lT[i]) + ((i < 2) ? ", " : "]\n");
-        //}
-        
-        //hierarchyString_ += ",\n";
 
         for (int i = 0; i < node->GetChildCount(); i++) {
             TraverseHierarchy(node->GetChild(i), node);
@@ -1058,7 +1328,19 @@ void FbxHelper::ConstructBoneMap()
     for (auto&& pair : boneMap_) {
         pair.second = boneID;
         boneID++;
-        std::cerr << pair.first << ": " << pair.second << std::endl;
+        //std::cerr << pair.first << ": " << pair.second << std::endl;
+    }
+    hierarchyArray_.resize(boneMap_.size());
+
+    auto root = fbxScene_->GetRootNode();
+    hierarchyString_ += "{\n";
+    TraverseHierarchy(root, nullptr);
+    auto lastCommaIdx = hierarchyString_.find_last_of(',');
+    if (lastCommaIdx != std::string::npos) {
+        hierarchyString_[lastCommaIdx] = '\n';
+        hierarchyString_[lastCommaIdx + 1] = '}';
+    } else {
+        hierarchyString_ += "}";
     }
 }
 

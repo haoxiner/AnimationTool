@@ -11,6 +11,8 @@ public:
     ~FbxHelper();
     bool LoadFBX(const std::string& filename);
     bool ExportAllFrames(const std::string& directory, const std::string& fileID);
+    bool ExportAllFramesInBoneSpace(const std::string& directory, const std::string& fileID);
+
     bool ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
     bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
@@ -26,6 +28,7 @@ private:
     void LogError(const std::string& errorMessage);
     void LogInfo(const std::string& message);
 private:
+    std::vector<int> hierarchyArray_;
     std::string hierarchyString_;
     std::string errorMessage_;
     FbxManager* fbxManager_ = nullptr;

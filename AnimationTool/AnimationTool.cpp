@@ -16,8 +16,15 @@ int main(int argc, char* argv[])
         std::cerr << "Fail To Open" << std::endl;
         return 1;
     }
+
+    //fbx.ExportAllFramesInBoneSpace(argv[2], "");
     //fbx.ExportVertexSkinningAsTextureForFaceUnity(argv[2], "");
+
+    //fbx.ExportAllFrames(argv[2], "anim");
+    //fbx.ExportHierarchy(argv[2], "skeleton");
+    //fbx.ExportHierarchyAnimation(argv[2], "animation");
+
     fbx.ExportAllFramesAsTexture(argv[2], "");
-    fbx.ExportBlendshapeToObj(argv[2] + std::string("/expression.json"), "", true);
+    fbx.ExportBlendshapeToObj(argv[2], "");
     return 0;
 }
