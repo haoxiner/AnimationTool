@@ -553,7 +553,7 @@ bool FbxHelper::ExportAllFramesInBoneSpace(const std::string& directory, const s
     return true;
 }
 
-bool FbxHelper::ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID)
+bool FbxHelper::ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID, bool animHead)
 {
     const int numOfAnimStack = animStackNameArray_.GetCount();
     if (numOfAnimStack > 1) {
@@ -682,7 +682,7 @@ bool FbxHelper::ExportAllFramesAsTexture(const std::string& directory, const std
     }
     output.close();
     std::ofstream outputJson(directory + "/anim.json");
-    outputJson << "{\"frame_num\":" << numOfFrame << ",\"cluster_num\":" << boneAnimMap_.size() << ",\"anim_head\":1}";
+    outputJson << "{\"frame_num\":" << numOfFrame << ",\"cluster_num\":" << boneAnimMap_.size() << ",\"anim_head\":" << (animHead ? "1" : "0") << "}";
     outputJson.close();
     return true;
 }
@@ -783,7 +783,7 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
     return true;
 }
 
-bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID)
+bool FbxHelper::ExportVertexSkinningForFaceUnity(const std::string& directory, const std::string& fileID)
 {
     const int MAX_BONE_PER_VERTEX = 8;
     int meshID = 0;
@@ -822,7 +822,7 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
                         if (boneWeight == 0.0f) {
                             continue;
                         }
-                        vertexBoneIDAndWeightList[indexOfVertex].emplace_back(std::make_pair(boneIndex, boneWeight));
+                        vertexBoneIDAndWeightList[indexOfVertex].emplace_back(std::make_pair(boneMap_[bone->GetLink()->GetName()], boneWeight));
                     }
                 }
             }
@@ -870,18 +870,18 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
                     }
                     for (int j = 0; j < MAX_BONE_PER_VERTEX; j++) {
                         if (j < 4) {
-                            perVertexBoneIDList0[i * 4 + j] /= totalWeight;
+                            perVertexBoneWeightList0[i * 4 + j] /= totalWeight;
                         } else {
-                            perVertexBoneIDList1[i * 4 + j - 4] /= totalWeight;
+                            perVertexBoneWeightList1[i * 4 + j - 4] /= totalWeight;
                         }
                     }
                 }
             }
             for (int i = 0; i < numOfVertex * 4; i++) {
                 perVertexBoneIDList0[i] += 0.5f;
-                perVertexBoneIDList0[i] /= totalBonesOfMesh;
+                perVertexBoneIDList0[i] /= boneMap_.size();
                 perVertexBoneIDList1[i] += 0.5f;
-                perVertexBoneIDList1[i] /= totalBonesOfMesh;
+                perVertexBoneIDList1[i] /= boneMap_.size();
             }
             std::cerr << "TOTAL BONE: " << totalBonesOfMesh << std::endl;
             std::string filename = directory + "\\" + FilterInvalidFileNameChar(std::to_string(meshID) + "_" + node->GetName());
@@ -893,10 +893,17 @@ bool FbxHelper::ExportVertexSkinningAsTextureForFaceUnity(const std::string& dir
             output.write(reinterpret_cast<char*>(perVertexBoneWeightList0.data()), sizeof(float) * perVertexBoneWeightList0.size());
             output.write(reinterpret_cast<char*>(perVertexBoneWeightList1.data()), sizeof(float) * perVertexBoneWeightList1.size());
             output.close();
+            std::ofstream outputLog(filename + ".txt");
+            outputLog << numOfVertex << "\n";
+            for (int i = 0; i < numOfVertex; i++) {
+                for (int j = 0; j < vertexBoneIDAndWeightList[i].size(); j++) {
+                    outputLog << vertexBoneIDAndWeightList[i][j].first << ": " << vertexBoneIDAndWeightList[i][j].second << ", ";
+                }
+                outputLog << "\n";
+            }
             meshID++;
         }
     }
-
     return true;
 }
 

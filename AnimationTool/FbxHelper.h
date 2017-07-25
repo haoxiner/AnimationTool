@@ -13,9 +13,9 @@ public:
     bool ExportAllFrames(const std::string& directory, const std::string& fileID);
     bool ExportAllFramesInBoneSpace(const std::string& directory, const std::string& fileID);
 
-    bool ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID);
+    bool ExportAllFramesAsTexture(const std::string& directory, const std::string& fileID, bool animHead = true);
     bool ExportVertexSkinning(const std::string& directory, const std::string& fileID);
-    bool ExportVertexSkinningAsTextureForFaceUnity(const std::string& directory, const std::string& fileID);
+    bool ExportVertexSkinningForFaceUnity(const std::string& directory, const std::string& fileID);
     
     bool ExportHierarchy(const std::string& directory, const std::string& fileID);
     bool ExportHierarchyAnimation(const std::string& directory, const std::string& fileID);

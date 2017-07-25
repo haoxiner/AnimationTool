@@ -3,11 +3,11 @@
 
 int main(int argc, char* argv[])
 {
-    if (argc != 3) {
-        std::cerr << "Usage: animation.exe <fbx_file_path> <output_path>" << std::endl;
+    if (argc != 4) {
+        std::cerr << "Usage: animation.exe 0|1 <fbx_file_path> <output_path>" << std::endl;
         return 0;
     }
-    std::string inputFilePath(argv[1]);
+    std::string inputFilePath(argv[2]);
     FbxHelper fbx;
     if (!fbx.Startup()) {
         return 1;
@@ -18,13 +18,17 @@ int main(int argc, char* argv[])
     }
 
     //fbx.ExportAllFramesInBoneSpace(argv[2], "");
-    //fbx.ExportVertexSkinningAsTextureForFaceUnity(argv[2], "");
+    
 
     //fbx.ExportAllFrames(argv[2], "anim");
     //fbx.ExportHierarchy(argv[2], "skeleton");
     //fbx.ExportHierarchyAnimation(argv[2], "animation");
 
-    fbx.ExportAllFramesAsTexture(argv[2], "");
-    fbx.ExportBlendshapeToObj(argv[2], "");
+    //======================== FACEUNITY BEGIN ============================= //
+    fbx.ExportVertexSkinningForFaceUnity(argv[3], "");
+    // export frames and blendshape
+    //fbx.ExportAllFramesAsTexture(argv[3], "", argv[1][0] == '1');
+    fbx.ExportBlendshapeToObj(argv[3], "", false);
+    //======================== FACEUNITY END ============================= //
     return 0;
 }
