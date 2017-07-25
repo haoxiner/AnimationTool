@@ -783,7 +783,7 @@ bool FbxHelper::ExportVertexSkinning(const std::string& directory, const std::st
     return true;
 }
 
-bool FbxHelper::ExportVertexSkinningForFaceUnity(const std::string& directory, const std::string& fileID)
+bool FbxHelper::ExportVertexSkinningTextureEdition(const std::string& directory, const std::string& fileID)
 {
     const int MAX_BONE_PER_VERTEX = 8;
     int meshID = 0;

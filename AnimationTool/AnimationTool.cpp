@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
     //fbx.ExportHierarchyAnimation(argv[2], "animation");
 
     //======================== FACEUNITY BEGIN ============================= //
-    fbx.ExportVertexSkinningForFaceUnity(argv[3], "");
+    fbx.ExportVertexSkinningTextureEdition(argv[3], "");
     // export frames and blendshape
     //fbx.ExportAllFramesAsTexture(argv[3], "", argv[1][0] == '1');
     fbx.ExportBlendshapeToObj(argv[3], "", false);
